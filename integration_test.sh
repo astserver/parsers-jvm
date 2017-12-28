@@ -1,4 +1,4 @@
-# This script does a full build of the AST server and compares input and output
+# This script runs the AST server from a fat .jar and compares input and output
 
 # Fail if any command fails in the script
 echo "Starting integration test..."
@@ -7,8 +7,7 @@ set -e
 # Print the output of commands as they run, including variables
 set -x
 
-# Build a fat jar file that contains application and all dependencies
-./gradlew shadowJar
+# This script assumes that the fat jar file has already been built
 FAT_JAR_FILE=build/libs/astserver-jvm-all.jar 
 
 # Run the server with a test input file

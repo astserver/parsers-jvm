@@ -154,8 +154,14 @@ task ktlint(type: JavaExec, group: "verification") {
   args "src/**/*.kt"
 }
 
+task integrationTest(type: Exec, group: "verification") {
+  dependsOn shadowJar
+  commandLine './integration_test.sh'
+}
+
 check.dependsOn ktlint
 check.dependsOn detektCheck
+check.dependsOn integrationTest
 
 task ktlintFormat(type: JavaExec, group: "formatting") {
   description = "Fix Kotlin code style deviations."
