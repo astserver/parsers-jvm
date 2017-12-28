@@ -1,0 +1,7 @@
+build
+.gradle
+.idea
+*.iml
+
+# Generated ANTLR parsers
+src/main/antlr/

@@ -1,0 +1,6 @@
+failFast: true
+autoCorrect: true
+
+style:
+  ReturnCount:
+    max: 5

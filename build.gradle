@@ -1,0 +1,169 @@
+buildscript {
+  ext {
+    // These correspond to versions in the dependencies section only.
+    antlrVersion = '4.7'
+    gsonVersion = '2.8.2'
+    junitVersion = '4.11'
+    mockitoKotlinVersion = '1.5.0'
+    ktLintVersion = '0.14.0'
+    gradleVersionForWrapper = '4.1'
+
+    // These must correspond to version numbers in the plugins section below.
+    kotlinVersion = '1.2.10'
+    detektVersion = '1.0.0.RC6'
+  }
+}
+
+plugins {
+  // These versions must correspond to version numbers in the ext section above.
+  // They cannot reference the ext version variables as the plugin version must
+  // be a string literal.
+  id "org.jetbrains.kotlin.jvm" version "1.2.10"
+  id "io.gitlab.arturbosch.detekt" version "1.0.0.RC6"
+
+  id "java"
+  id "com.github.johnrengelman.shadow" version "2.0.2"
+}
+
+repositories {
+  mavenCentral()
+  jcenter()
+}
+
+apply plugin: 'antlr'
+apply plugin: 'application'
+
+mainClassName = 'org.astserver.MainKt'
+
+configurations {
+  ktlint
+  // This is necessary to prevent the non-runtime ANTLR dependencies from being
+  // part of the generated shadowJar jar file. Instead, there is a separate
+  // dependency on the ANTLR runtime that does get included.
+  // See: https://github.com/gradle/gradle/issues/820#issuecomment-288838412
+  compile {
+    extendsFrom = extendsFrom.findAll { it != configurations.antlr }
+  }
+}
+
+dependencies {
+  antlr "org.antlr:antlr4:$antlrVersion"
+  ktlint "com.github.shyiko:ktlint:$ktLintVersion"
+
+  compile "com.google.code.gson:gson:$gsonVersion"
+  compile "org.antlr:antlr4-runtime:$antlrVersion"
+  compile "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
+
+  testCompile "com.nhaarman:mockito-kotlin-kt1.1:$mockitoKotlinVersion"
+  testCompile "junit:junit:$junitVersion"
+  testCompile "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion"
+  testCompile "org.jetbrains.kotlin:kotlin-test-junit:$kotlinVersion"
+}
+
+def grammarsV4Files(String... files) {
+  files.collect({
+    file -> fileTree(dir:'grammars-v4')
+    .matching{include file}
+    .getFiles()
+  })
+}
+
+task copyGrammars(type: Copy) {
+  description 'Copies some ANTLR grammar .g4 files from grammars-v4 git ' + 
+      'submodule to build folder so the generateGarmmarSource task will ' + 
+      'generate parsers for them. Only grammars in this list are usable via ' + 
+      'this JSON-RPC parse server.'
+  from grammarsV4Files(
+      // Include these grammars because they embed Java code and so don't 
+      // support the C++ target yet.
+      'antlr4/ANTLRv4Lexer.g4', 'antlr4/ANTLRv4Parser.g4', 'antlr4/LexBasic.g4',
+      'csharp/CSharpLexer.g4', 'csharp/CSharpParser.g4',
+      'golang/*.g4',
+      'java9/*.g4',
+      'php/*.g4', // PHP 5.6
+      'python3alt/*.g4', // Python 3.3.6 with graceful fallback for Python2-isms
+      'swift3/*.g4',
+
+      // Include simple Lisp s-expressions grammar for the integration test.
+      'sexpression/*.g4',
+  )
+  into 'build/antlr/grammars'
+}
+
+sourceSets.main.antlr.srcDirs = ['build/antlr/grammars']
+
+generateGrammarSource {
+  dependsOn copyGrammars
+  outputDirectory = file("${project.buildDir}/generated-src/antlr/main/")
+  arguments += ["-no-listener"]
+}
+
+task copyGrammarSupportFiles(type: Copy) {
+  description 'Copies grammar support Java files to the source folder for ' + 
+      'auto-generated ANTLR parsers. This is needed so that those parsers ' +
+      'will compile correctly with their extra helper Java code.'
+
+  // This needs to be after the generateGrammarSource task so that the grammar 
+  // support files are not overridden in the generated soure folder.
+  dependsOn generateGrammarSource
+
+  from {
+    grammarsV4Files(
+        'swift3/src/main/java/*.java',
+        'antlr4/src/main/java/org/antlr/parser/antlr4/*.java',
+    )
+  }
+  into "${project.buildDir}/generated-src/antlr/main"
+
+  // This is needed to change the ANTLRv4 grammar lexer Java support class to be 
+  // in the default package so the ANTLRv4 lexer can compile against it. The 
+  // lexers and parsers are in the default package because the Swift v3
+  // lexer/parser depends on a Java support file that is in the default package.
+  filter { it.replaceAll('package org.antlr.parser.antlr4;', '') }
+}
+
+task removeExtraFragmentLexerFiles(type: Delete) {
+  description 'This deletes auto-generated lexer Java files for lexers that ' +
+      'were imported into another lexer but that are not needed as Java ' +
+      'classes on their own. This prevents compile errors / unneeded classes.'
+  dependsOn copyGrammarSupportFiles
+  // The LexBasic lexer is used by the ANTLRv4Lexer but is not useful on its own
+  // as a Java class. Attempting to compile it also gives a compiler error.
+  delete file( "${project.buildDir}/generated-src/antlr/main/LexBasic.java")
+}
+
+compileJava.dependsOn removeExtraFragmentLexerFiles
+
+// This is needed so that "gradle run" will listen for input from stdin to
+// enable testing the stdin/stdout JSON-RPC server.
+run.standardInput = System.in
+
+detekt {
+  version = "$detektVersion"
+  profile("main") {
+    input = "$projectDir/src/main/kotlin"
+    config = "$projectDir/detekt.yml"
+    filters = ".*test.*,.*/resources/.*,.*/tmp/.*"
+  }
+}
+
+task ktlint(type: JavaExec, group: "verification") {
+  description = "Check Kotlin code style."
+  main = "com.github.shyiko.ktlint.Main"
+  classpath = configurations.ktlint
+  args "src/**/*.kt"
+}
+
+check.dependsOn ktlint
+check.dependsOn detektCheck
+
+task ktlintFormat(type: JavaExec, group: "formatting") {
+  description = "Fix Kotlin code style deviations."
+  main = "com.github.shyiko.ktlint.Main"
+  classpath = configurations.ktlint
+  args "-F", "src/**/*.kt"
+}
+
+task wrapper(type: Wrapper) {
+  gradleVersion = "$gradleVersionForWrapper"
+}

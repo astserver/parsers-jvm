@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"parse","params":{"grammar":"sexpression","sourceText":"(* n n)"}}
+invalid json!
+{"jsonrpc":"2.0","id":"a","method":"getNodeKinds","params":{"grammar":"sexpression"}}
+{"jsonrpc":"2.0","id":[3],"method":"parse","params":{"grammar":"sexpression","sourceText":")"}}
+{"jsonrpc":"2.0","id":7,"method":"parse","params":{"grammar":"Not a grammar!","sourceText":"()"}}
